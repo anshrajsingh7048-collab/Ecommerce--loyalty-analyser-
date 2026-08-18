@@ -70,4 +70,5 @@ if "analyzed_df" in st.session_state:
         fig_loyalty = px.bar(loyalty_agg, x="loyalty_tier", y="count", color="Delivery_Status", barmode="group",
                              color_discrete_sequence=["#2ecc71", "#e74c3c"])
         st.plotly_chart(fig_loyalty, use_container_width=True)
-      
+
+    
