@@ -48,7 +48,10 @@ class EcommerceDataEngine:
     @staticmethod
     def generate_synthetic_data(platform_name: str, areas: list, n_rows: int = 5000) -> pd.DataFrame:
         np.random.seed(42)
-        prefix = platform_name.upper().replace(" ", "_")[:5]
+        prefix = platform_name.upper().replace(" ", "_")[:5] if platform_name else "STORE"
+        if not areas or len(areas) == 0:
+            areas = ["Bangalore South", "Delhi NCR", "Mumbai West", "Hyderabad Central"]
+
         order_dates = pd.date_range(end=datetime.now(), periods=n_rows, freq="h")
         promised_offsets = np.random.choice([2, 3, 4, 5], size=n_rows, p=[0.25, 0.45, 0.20, 0.10])
         actual_offsets = np.random.exponential(scale=2.8, size=n_rows) + 1.0
@@ -60,7 +63,7 @@ class EcommerceDataEngine:
             "promised_delivery_date": order_dates + pd.to_timedelta(promised_offsets, unit="D"),
             "actual_delivery_date": order_dates + pd.to_timedelta(actual_offsets, unit="D"),
             "area": np.random.choice(areas, size=n_rows),
-            "platform": platform_name
+            "platform": platform_name if platform_name else "E-Commerce Store"
         }
         return EcommerceDataEngine.process_metrics(pd.DataFrame(records))
 
@@ -68,24 +71,31 @@ class EcommerceDataEngine:
     def process_metrics(df: pd.DataFrame) -> pd.DataFrame:
         if df.empty:
             return df
+            
         df["order_date"] = pd.to_datetime(df["order_date"], errors="coerce")
         df["actual_delivery_date"] = pd.to_datetime(df["actual_delivery_date"], errors="coerce")
-        df["promised_delivery_date"] = pd.to_datetime(df["promised_delivery_date"], errors="coerce").fillna(
-            df["order_date"] + pd.Timedelta(days=3)
-        )
+        df["promised_delivery_date"] = pd.to_datetime(df["promised_delivery_date"], errors="coerce")
+        
+        # Fallback SLA if missing
+        missing_sla = df["promised_delivery_date"].isna()
+        df.loc[missing_sla, "promised_delivery_date"] = df.loc[missing_sla, "order_date"] + pd.Timedelta(days=3)
+
         df["delay_days"] = (df["actual_delivery_date"] - df["promised_delivery_date"]).dt.total_seconds() / 86400.0
         df["is_late"] = np.where(df["delay_days"] > 0, 1, 0)
-        df = df.sort_values(by=["customer_id", "order_date"])
+        
+        df = df.sort_values(by=["customer_id", "order_date"]).reset_index(drop=True)
         df["next_order_date"] = df.groupby("customer_id")["order_date"].shift(-1)
-        df["repurchase_gap_days"] = (df["next_order_date"] - df["order_date"]).dt.total_seconds() / 86400.0
+        raw_gap = (df["next_order_date"] - df["order_date"]).dt.total_seconds() / 86400.0
         
-        base_ontime = df[df["is_late"] == 0]["repurchase_gap_days"].mean()
-        base_late = df[df["is_late"] == 1]["repurchase_gap_days"].mean()
-        default_ontime = 24.0 if pd.isna(base_ontime) else base_ontime
-        default_late = (default_ontime + 32.0) if pd.isna(base_late) else base_late
-        
-        df["repurchase_gap_days"] = df["repurchase_gap_days"].fillna(
-            np.where(df["is_late"] == 1, default_late, default_ontime)
-        )
+        # Impute missing values using np.where without calling df.fillna()
+        default_late = 56.0
+        default_ontime = 24.0
+        fallback_values = np.where(df["is_late"] == 1, default_late, default_ontime)
+        df["repurchase_gap_days"] = np.where(raw_gap.isna(), fallback_values, raw_gap)
+
         df["loyalty_tier"] = np.where(
-            df["repurchase_gap_days
+            df["repurchase_gap_days"] <= 30, "High Loyalty (<=30d)",
+            np.where(df["repurchase_gap_days"] <= 60, "Moderate Loyalty (31-60d)", "At-Risk / Churned (>60d)")
+        )
+        return df
+        
