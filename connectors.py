@@ -88,8 +88,4 @@ class EcommerceDataEngine:
             np.where(df["is_late"] == 1, default_late, default_ontime)
         )
         df["loyalty_tier"] = np.where(
-            df["repurchase_gap_days"] <= 30, "High Loyalty (<=30d)",
-            np.where(df["repurchase_gap_days"] <= 60, "Moderate Loyalty (31-60d)", "At-Risk / Churned (>60d)")
-        )
-        return df
-      
+            df["repurchase_gap_days
