@@ -71,4 +71,4 @@ if "analyzed_df" in st.session_state:
                              color_discrete_sequence=["#2ecc71", "#e74c3c"])
         st.plotly_chart(fig_loyalty, use_container_width=True)
 
-    
+
