@@ -1,3 +1,14 @@
+st.set_page_config(page_title="Universal E-Commerce Loyalty Analytics", layout="wide", page_icon="📦")
+
+# --- HIDE TOP MENU & GITHUB ICONS ---
+hide_streamlit_style = """
+<style>
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+</style>
+"""
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 import asyncio
 import re
 from datetime import datetime
