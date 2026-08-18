@@ -9,11 +9,10 @@ import plotly.express as px
 
 st.set_page_config(page_title="Universal E-Commerce Loyalty Analytics", layout="wide", page_icon="📦")
 
-# --- CORE ENGINE WITH DYNAMIC REGIONAL PROFILING ---
+# --- CORE ENGINE ---
 class EcommerceDataEngine:
     @staticmethod
     def _get_hash_seed(text: str) -> int:
-        """Creates a stable numeric seed from any string."""
         return sum(ord(c) * (i + 1) for i, c in enumerate(text.strip().lower())) % (10**6)
 
     @staticmethod
@@ -62,29 +61,24 @@ class EcommerceDataEngine:
 
         valid_areas = [a.strip() for a in areas if a.strip()]
         if not valid_areas:
-            valid_areas = ["North Zone", "South Zone", "East Zone", "West Zone"]
+            valid_areas = ["Bangalore", "Mumbai", "Delhi", "Kolkata"]
 
-        # Platform baseline profile (derived from platform name)
         p_seed = EcommerceDataEngine._get_hash_seed(clean_platform)
         p_rng = np.random.default_rng(p_seed)
         
-        # Platform speed efficiency (affects delivery times) & customer loyalty baseline
         platform_base_speed = p_rng.uniform(1.6, 3.4)
         platform_base_loyalty = p_rng.uniform(15.0, 32.0)
 
         records_list = []
         orders_per_area = max(100, n_rows // len(valid_areas))
 
-        # Generate custom statistical distributions per area
         for area in valid_areas:
             a_seed = EcommerceDataEngine._get_hash_seed(clean_platform + "_" + area)
             a_rng = np.random.default_rng(a_seed)
 
-            # Area difficulty multiplier (metro vs suburban vs remote delivery delays)
             area_congestion_factor = a_rng.uniform(0.65, 1.65)
             effective_scale = platform_base_speed * area_congestion_factor
 
-            # Repurchase sensitivity in this specific region
             area_loyalty_gap = platform_base_loyalty * a_rng.uniform(0.8, 1.3)
             area_delay_penalty = a_rng.uniform(22.0, 50.0)
 
@@ -93,16 +87,13 @@ class EcommerceDataEngine:
             order_dates = pd.date_range(end=datetime.now(), periods=area_orders, freq="h")
             promised_offsets = a_rng.choice([1, 2, 3, 4, 5], size=area_orders, p=[0.15, 0.35, 0.30, 0.15, 0.05])
             
-            # Actual delivery days calculated specifically for this area
             actual_offsets = a_rng.exponential(scale=effective_scale, size=area_orders) + a_rng.uniform(0.5, 1.2)
             actual_delivery_dates = order_dates + pd.to_timedelta(actual_offsets, unit="D")
             promised_delivery_dates = order_dates + pd.to_timedelta(promised_offsets, unit="D")
 
-            # Delay logic
             delays = (actual_delivery_dates - promised_delivery_dates).total_seconds() / 86400.0
             is_late_arr = (delays > 0).astype(int)
 
-            # Behavioral Repurchase Gap
             base_gaps = a_rng.exponential(scale=area_loyalty_gap, size=area_orders)
             penalties = is_late_arr * (area_delay_penalty + a_rng.uniform(-5, 10, size=area_orders))
             repurchase_gaps = base_gaps + penalties
@@ -152,36 +143,36 @@ class EcommerceDataEngine:
         )
         return df
 
-# --- FRONTEND UI ---
+# --- INPUT FORM ---
 st.title("📦 Multi-Store Delivery Delays & Loyalty Analyzer")
 st.markdown("Analyze delivery SLA breaches and customer retention impact for **any platform** and **any city/area**.")
 
-col1, col2 = st.columns([1, 2])
-
-with col1:
-    ecommerce_name = st.text_input("🏢 E-Commerce Platform / Brand Name", value="Flipkart")
-
-with col2:
+with st.form("input_form"):
+    ecommerce_name = st.text_input("🏢 E-Commerce Platform / Brand Name", value="Blinkit")
     areas_input = st.text_input(
         "📍 Target Areas / Cities (separated by commas)",
-        value="Kolkata, Mumbai, Delhi NCR, Bangalore, Hyderabad, Chennai"
+        value="Jamshedpur, Ranchi, Kolkata, Patna"
     )
-
-parsed_areas = [a.strip() for a in areas_input.split(",") if a.strip()]
+    submit_button = st.form_submit_button("🚀 Run Analysis / Update Data", type="primary")
 
 with st.expander("🔑 Connect Live Shopify API (Optional)"):
     store_url = st.text_input("Store URL (e.g. brand.myshopify.com)")
     admin_token = st.text_input("Shopify API Access Token", type="password")
 
-# --- FETCH / REGENERATE ON EVERY INPUT CHANGE ---
-if store_url and admin_token:
-    try:
-        df = asyncio.run(EcommerceDataEngine.fetch_shopify(store_url, admin_token))
-    except Exception as e:
-        st.warning(f"Could not connect to API: {e}. Showing modeled analytics instead.")
-        df = EcommerceDataEngine.generate_synthetic_data(ecommerce_name, parsed_areas)
-else:
-    df = EcommerceDataEngine.generate_synthetic_data(ecommerce_name, parsed_areas)
+parsed_areas = [a.strip() for a in areas_input.split(",") if a.strip()]
+
+# Generate data on load or when button is pressed
+if "current_df" not in st.session_state or submit_button:
+    if store_url and admin_token:
+        try:
+            st.session_state.current_df = asyncio.run(EcommerceDataEngine.fetch_shopify(store_url, admin_token))
+        except Exception as e:
+            st.warning(f"Could not connect to API: {e}. Showing modeled data.")
+            st.session_state.current_df = EcommerceDataEngine.generate_synthetic_data(ecommerce_name, parsed_areas)
+    else:
+        st.session_state.current_df = EcommerceDataEngine.generate_synthetic_data(ecommerce_name, parsed_areas)
+
+df = st.session_state.current_df
 
 # --- ANALYTICS DASHBOARD ---
 st.markdown("---")
@@ -204,13 +195,13 @@ k1.metric("Orders Analyzed", f"{total_orders:,}")
 k1.caption(f"Scope: {selected_area}")
 
 k2.metric("SLA Breach Rate", f"{breach_rate:.1f}%")
-k2.caption("Orders delivered after promised date")
+k2.caption("Late deliveries")
 
 k3.metric("On-Time Repurchase Gap", f"{ontime_gap:.1f} days")
-k3.caption("Avg repeat order cadence")
+k3.caption("Avg repeat cadence")
 
-k4.metric("Delay Churn Penalty", f"+{churn_penalty:.1f} extra days", delta_color="inverse")
-k4.caption("Repurchase delay caused by late delivery")
+k4.metric("Delay Churn Penalty", f"+{churn_penalty:.1f} days", delta_color="inverse")
+k4.caption("Extra days lost to delay")
 
 st.markdown("---")
 
@@ -251,8 +242,8 @@ with chart_right:
     )
     st.plotly_chart(fig_loyalty, use_container_width=True)
 
-# Breakdown Table
-st.markdown("#### 📋 Regional Performance & Loyalty Summary Table")
+# Summary Table
+st.markdown("#### 📋 Regional Performance Table")
 table_df = df.groupby("area").agg(
     Total_Orders=('order_id', 'count'),
     Late_Deliveries=('is_late', 'sum'),
@@ -260,3 +251,4 @@ table_df = df.groupby("area").agg(
     Avg_Repurchase_Gap=('repurchase_gap_days', lambda x: f"{x.mean():.1f} days")
 ).reset_index()
 st.dataframe(table_df, use_container_width=True)
+            
